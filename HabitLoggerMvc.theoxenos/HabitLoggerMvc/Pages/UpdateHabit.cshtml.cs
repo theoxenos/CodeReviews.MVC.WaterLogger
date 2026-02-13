@@ -1,15 +1,18 @@
+using HabitLoggerMvc.Helpers;
 using HabitLoggerMvc.Models;
 using HabitLoggerMvc.Repositories;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace HabitLoggerMvc.Pages;
 
-public class UpdateHabit(IRepository<Habit> habitRepository, IHabitUnitRepository habitUnitRepository) : ErrorPageModel
+public class UpdateHabit(IRepository<Habit> habitRepository, IHabitUnitRepository habitUnitRepository) : PageModel
 {
     [BindProperty] public Habit HabitModel { get; set; }
 
-    public List<HabitUnit> HabitUnits { get; set; }
+    public List<HabitUnit> HabitUnits { get; set; } = [];
 
     public async Task<IActionResult> OnGetAsync(int id)
     {
@@ -23,11 +26,12 @@ public class UpdateHabit(IRepository<Habit> habitRepository, IHabitUnitRepositor
         }
         catch (KeyNotFoundException)
         {
-            return NotFound();
+            TempData["ErrorMessage"] = $"Habit with Id {id} not found";
+            return Page();
         }
-        catch (Exception ex)
+        catch (SqliteException ex)
         {
-            ErrorMessage = ex.Message;
+            TempData["ErrorMessage"] = ex.BuildUserErrorMessage();
             return Page();
         }
     }
@@ -43,10 +47,13 @@ public class UpdateHabit(IRepository<Habit> habitRepository, IHabitUnitRepositor
         {
             await habitRepository.UpdateAsync(HabitModel);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception) when (exception.InnerException is SqliteException
+                                                  {
+                                                      SqliteExtendedErrorCode: SqliteExceptionHelper
+                                                          .SQLITE_CONSTRAINT_UNIQUE
+                                                  } sqliteException)
         {
-            ModelState.AddModelError("HabitModel.Name",
-                "An error occurred while saving. Ensure the name is unique if required.");
+            ModelState.AddModelError("HabitModel.Name", sqliteException.BuildUserErrorMessage());
             IEnumerable<HabitUnit> units = await habitUnitRepository.GetAll();
             HabitUnits = units.ToList();
             return Page();
